@@ -92,3 +92,10 @@ export const radius = {
 } as const;
 
 export type ThemeColors = typeof lightColors;
+
+/**
+ * Widened palette — `lightColors`/`darkColors` are `as const`, so their literal
+ * hex types are mutually incompatible. Components that accept either scheme's
+ * palette should annotate with this.
+ */
+export type Palette = { readonly [K in keyof ThemeColors]: string };

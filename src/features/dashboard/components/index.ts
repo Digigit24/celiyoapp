@@ -1,0 +1,9 @@
+export { DashboardErrorBoundary } from "./DashboardErrorBoundary";
+export { AdminDashboard } from "./AdminDashboard";
+export { DoctorDashboard } from "./DoctorDashboard";
+export { NurseDashboard } from "./NurseDashboard";
+export { ReceptionistDashboard } from "./ReceptionistDashboard";
+export { CashierDashboard } from "./CashierDashboard";
+export { PharmacistDashboard } from "./PharmacistDashboard";
+export { LabTechnicianDashboard } from "./LabTechnicianDashboard";
+export { StaffDashboard } from "./StaffDashboard";
