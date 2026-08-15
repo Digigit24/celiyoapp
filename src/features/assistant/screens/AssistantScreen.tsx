@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 // A streaming-capable fetch (real ReadableStream body) -- used instead of RN's
 // built-in fetch, which can't read a streaming response (see
@@ -6,8 +6,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { fetch as expoFetch } from "expo/fetch";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { HermesChatNative } from "@digitech/hermes-chat-native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { DrawerNavigationProp } from "@react-navigation/drawer";
 import { useAuth } from "../../../store/AuthContext";
 import { getAssistantBaseUrl } from "../lib/assistantSettings";
+import { useTabBarVisibility } from "../../../navigation/tabBarVisibility";
+import type { AppDrawerParamList } from "../../../navigation/routes";
 
 const CONVERSATION_ID_KEY_PREFIX = "assistant-conversation-id:";
 
@@ -23,8 +27,23 @@ const CONVERSATION_ID_KEY_PREFIX = "assistant-conversation-id:";
  */
 export function AssistantScreen() {
   const { session } = useAuth();
+  const navigation = useNavigation<DrawerNavigationProp<AppDrawerParamList>>();
+  const { setHidden } = useTabBarVisibility();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
+
+  // The floating bottom tab bar is an overlay drawn on top of every drawer
+  // screen; it has no awareness of this screen's own composer sitting at the
+  // same bottom edge, so it visually covers it. Hide it only while this
+  // screen is actually focused -- drawer screens stay mounted when you
+  // navigate away, so a plain mount/unmount effect would leave it hidden
+  // everywhere else too.
+  useFocusEffect(
+    useCallback(() => {
+      setHidden(true);
+      return () => setHidden(false);
+    }, [setHidden]),
+  );
 
   const storageKey = session?.userId ? `${CONVERSATION_ID_KEY_PREFIX}${session.userId}` : null;
 
@@ -76,6 +95,7 @@ export function AssistantScreen() {
         brand={{ displayName: "Celiyo Assistant", accentColor: "#2563eb" }}
         fetch={expoFetch as unknown as typeof globalThis.fetch}
         adminUrl={`${baseUrl}/admin`}
+        onMenuPress={() => navigation.openDrawer()}
       />
     </SafeAreaView>
   );
