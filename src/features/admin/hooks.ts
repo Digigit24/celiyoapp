@@ -1,70 +1,113 @@
 /**
- * Admin (staff administration) hooks.
+ * Admin (staff administration) hooks — backed by the real superadmin
+ * `/api/users/` + `/api/roles/` endpoints (`src/lib/api/adminUsers.ts`).
  *
- * __demo: true — for the Phase 3 demo these return the static fixtures from
- * `constants.ts`. The shape is the same one the future API will return, so
- * the screens don't need to change when the live endpoint lands. Each hook
- * just swaps to a `useQuery({ queryFn: ... })` against `lib/api/admin`.
- *
- * Filter / search are applied client-side over the demo data. The real API
- * will take these as query params, but the input contract stays identical.
+ * The real ViewSets take no search/filter query params server-side, so
+ * `useStaffList`/`useRoles` fetch everything and the screens filter
+ * client-side (search box, status chips) — same pattern the old demo module
+ * used over its fixtures, just pointed at live data now.
  */
-import { useMemo } from "react";
-import { DEMO_STAFF, type StaffMember, type StaffStatus } from "./constants";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "../../store/AuthContext";
+import * as api from "../../lib/api/adminUsers";
+import type {
+  RoleCreatePayload,
+  RoleUpdatePayload,
+  StaffCreatePayload,
+  StaffUpdatePayload,
+} from "../../types/admin";
 
-export interface UseStaffListParams {
-  /** Free-text search across name, employee id, department, and email. */
-  search?: string;
-  /** Filter by status. `all` (or undefined) returns everything. */
-  status?: "all" | StaffStatus;
+function useSignedIn(): boolean {
+  return useAuth().status === "signedIn";
 }
 
-export interface UseStaffListResult {
-  data: StaffMember[];
-  isLoading: boolean;
-  isError: boolean;
-  /** Total dataset size before filtering — useful for "showing X of Y". */
-  totalCount: number;
+export const adminKeys = {
+  staffList: () => ["admin", "staff", "list"] as const,
+  staffDetail: (id: string) => ["admin", "staff", "detail", id] as const,
+  roles: () => ["admin", "roles", "list"] as const,
+};
+
+export function useStaffList() {
+  const enabled = useSignedIn();
+  return useQuery({ queryKey: adminKeys.staffList(), queryFn: api.listStaff, enabled });
 }
 
-export function useStaffList(params: UseStaffListParams = {}): UseStaffListResult {
-  const { search, status = "all" } = params;
-
-  const filtered = useMemo(() => {
-    const q = search?.trim().toLowerCase() ?? "";
-    return DEMO_STAFF.filter((staff) => {
-      if (status !== "all" && staff.status !== status) return false;
-      if (q.length === 0) return true;
-      return (
-        staff.name.toLowerCase().includes(q) ||
-        staff.employeeId.toLowerCase().includes(q) ||
-        staff.department.toLowerCase().includes(q) ||
-        staff.email.toLowerCase().includes(q)
-      );
-    });
-  }, [search, status]);
-
-  return {
-    data: filtered,
-    isLoading: false,
-    isError: false,
-    totalCount: DEMO_STAFF.length,
-  };
+export function useStaffMember(id: string | null | undefined) {
+  const enabled = useSignedIn() && Boolean(id);
+  return useQuery({
+    queryKey: adminKeys.staffDetail(id ?? ""),
+    queryFn: () => api.getStaff(id as string),
+    enabled,
+  });
 }
 
-/**
- * Look up a single staff member by id. Receives the same shape the API will
- * return — the future implementation will read `/admin/staff/{id}`.
- */
-export function useStaffMember(id: string | null | undefined): {
-  data: StaffMember | null;
-  isLoading: boolean;
-  isError: boolean;
-} {
-  const data = useMemo(() => {
-    if (!id) return null;
-    return DEMO_STAFF.find((staff) => staff.id === id) ?? null;
-  }, [id]);
+export function useRoles() {
+  const enabled = useSignedIn();
+  return useQuery({ queryKey: adminKeys.roles(), queryFn: api.listRoles, enabled });
+}
 
-  return { data, isLoading: false, isError: false };
+export function useCreateStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: StaffCreatePayload) => api.createStaff(payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: adminKeys.staffList() }),
+  });
+}
+
+export function useUpdateStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: StaffUpdatePayload }) => api.updateStaff(id, payload),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: adminKeys.staffList() });
+      qc.invalidateQueries({ queryKey: adminKeys.staffDetail(id) });
+    },
+  });
+}
+
+/** Thin wrapper over `useUpdateStaff` for the primary "remove access" action — `PATCH {is_active}`, no hard delete. */
+export function useDeactivateStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      api.updateStaff(id, { is_active: isActive }),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: adminKeys.staffList() });
+      qc.invalidateQueries({ queryKey: adminKeys.staffDetail(id) });
+    },
+  });
+}
+
+/** Real hard delete — no server-side safety net. Screens should gate this behind a strong confirmation. */
+export function useDeleteStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteStaff(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: adminKeys.staffList() }),
+  });
+}
+
+export function useCreateRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: RoleCreatePayload) => api.createRole(payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: adminKeys.roles() }),
+  });
+}
+
+export function useUpdateRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: RoleUpdatePayload }) => api.updateRole(id, payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: adminKeys.roles() }),
+  });
+}
+
+/** No member-count guard server-side — same confirmation caution as `useDeleteStaff`. */
+export function useDeleteRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteRole(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: adminKeys.roles() }),
+  });
 }
