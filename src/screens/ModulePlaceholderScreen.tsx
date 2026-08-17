@@ -7,7 +7,10 @@ interface ModulePlaceholderScreenProps {
   route: { params: { moduleId: string } };
 }
 
-/** Placeholder for modules that land in Phase 2/3. */
+/**
+ * Placeholder for modules that land in Phase 2/3 — honest empty state with
+ * the module name + phase copy. Same shell all 8 placeholder modules use.
+ */
 export function ModulePlaceholderScreen({ route }: ModulePlaceholderScreenProps) {
   const mod = MODULES.find((m) => m.id === route.params.moduleId);
 
@@ -18,9 +21,10 @@ export function ModulePlaceholderScreen({ route }: ModulePlaceholderScreenProps)
         title={mod?.label ?? "Module"}
         message={
           mod?.phase
-            ? `This module ships in Phase ${mod.phase}. The shell, auth, and permissions are already live.`
+            ? `This module ships in Phase ${mod.phase}. The shell, auth, and permissions are already live — the backend wiring lands with the phase.`
             : "Coming soon."
         }
+        size="lg"
       />
     </View>
   );

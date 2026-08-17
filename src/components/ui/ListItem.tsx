@@ -6,17 +6,26 @@ interface ListItemProps extends Omit<PressableProps, "children"> {
   title: string;
   subtitle?: string;
   leftIcon?: keyof typeof Ionicons.glyphMap;
+  /** Avatar slot rendered on the left when `leftIcon` is not set. */
+  leftAvatar?: React.ReactNode;
   right?: React.ReactNode;
   /** Show a trailing chevron (defaults to true when onPress is set). */
   chevron?: boolean;
+  /** Eyebrow text above the title (e.g. patient ID). */
+  eyebrow?: string;
+  /** Optional status chip rendered to the right of the title row. */
+  chip?: React.ReactNode;
 }
 
 export function ListItem({
   title,
   subtitle,
   leftIcon,
+  leftAvatar,
   right,
   chevron,
+  eyebrow,
+  chip,
   ...props
 }: ListItemProps) {
   const showChevron = chevron ?? Boolean(props.onPress);
@@ -30,17 +39,36 @@ export function ListItem({
       ].join(" ")}
       {...props}
     >
-      {leftIcon ? (
+      {leftAvatar ? (
+        leftAvatar
+      ) : leftIcon ? (
         <View className="h-9 w-9 items-center justify-center rounded-lg bg-secondary">
           <Ionicons name={leftIcon} size={18} color="#2563eb" />
         </View>
       ) : null}
-      <View className="flex-1">
-        <Text className="text-base font-medium text-card-foreground" numberOfLines={1}>
-          {title}
-        </Text>
+      <View className="flex-1 min-w-0">
+        {eyebrow ? (
+          <Text
+            className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            numberOfLines={1}
+          >
+            {eyebrow}
+          </Text>
+        ) : null}
+        <View className="flex-row items-center gap-2">
+          <Text
+            className="text-[15px] font-medium text-card-foreground flex-1"
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+          {chip}
+        </View>
         {subtitle ? (
-          <Text className="text-sm text-muted-foreground" numberOfLines={1}>
+          <Text
+            className="text-sm text-muted-foreground"
+            numberOfLines={1}
+          >
             {subtitle}
           </Text>
         ) : null}
