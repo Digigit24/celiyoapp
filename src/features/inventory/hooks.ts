@@ -1,72 +1,160 @@
-/**
- * Inventory hooks.
- *
- * __demo: true — for the Phase 3 demo these return the static fixtures from
- * `constants.ts`. The shape is the same one the future API will return, so
- * the screens don't need to change when the live endpoint lands. Each hook
- * just swaps to a `useQuery({ queryFn: ... })` against `lib/api/inventory`.
- *
- * Filter / search are applied client-side over the demo data. The real API
- * will take these as query params, but the input contract stays identical.
- */
-import { useMemo } from "react";
-import { DEMO_INVENTORY_ITEMS, type InventoryItem, type ItemCategory } from "./constants";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as api from "../../lib/api/inventory";
+import { useAuth } from "../../store/AuthContext";
+import type {
+  AdjustStockPayload,
+  InventoryItemCreatePayload,
+  InventoryItemUpdatePayload,
+  IssueStockPayload,
+  ReceiveStockPayload,
+} from "../../types/inventory";
 
-export interface UseInventoryListParams {
-  /** Free-text search across item name, ref, and supplier. */
-  search?: string;
-  /** Filter by category. `all` (or undefined) returns everything. */
-  category?: "all" | ItemCategory;
+function useSignedIn(): boolean {
+  return useAuth().status === "signedIn";
 }
 
-export interface UseInventoryListResult {
-  data: InventoryItem[];
-  isLoading: boolean;
-  isError: boolean;
-  /** Total dataset size before filtering — useful for "showing X of Y". */
-  totalCount: number;
+export const inventoryKeys = {
+  list: (params?: api.InventoryItemListParams) => ["inventory", "items", "list", params ?? {}] as const,
+  lowStock: () => ["inventory", "items", "low-stock"] as const,
+  expiringSoon: (days: number) => ["inventory", "items", "expiring-soon", days] as const,
+  detail: (id: number) => ["inventory", "items", "detail", id] as const,
+  batches: (itemId: number) => ["inventory", "items", itemId, "batches"] as const,
+  stockHistory: (itemId: number) => ["inventory", "items", itemId, "stock-history"] as const,
+  alerts: (params?: { is_acknowledged?: boolean }) => ["inventory", "alerts", params ?? {}] as const,
+};
+
+export function useInventoryItems(params?: api.InventoryItemListParams) {
+  const enabled = useSignedIn();
+  return useQuery({
+    queryKey: inventoryKeys.list(params),
+    queryFn: () => api.listInventoryItems(params),
+    enabled,
+  });
 }
 
-export function useInventoryList(
-  params: UseInventoryListParams = {}
-): UseInventoryListResult {
-  const { search, category = "all" } = params;
-
-  const filtered = useMemo(() => {
-    const q = search?.trim().toLowerCase() ?? "";
-    return DEMO_INVENTORY_ITEMS.filter((item) => {
-      if (category !== "all" && item.category !== category) return false;
-      if (q.length === 0) return true;
-      return (
-        item.name.toLowerCase().includes(q) ||
-        item.itemRef.toLowerCase().includes(q) ||
-        item.supplier.toLowerCase().includes(q) ||
-        item.batchNo.toLowerCase().includes(q)
-      );
-    });
-  }, [search, category]);
-
-  return {
-    data: filtered,
-    isLoading: false,
-    isError: false,
-    totalCount: DEMO_INVENTORY_ITEMS.length,
-  };
+export function useLowStockItems(enabled: boolean) {
+  const signedIn = useSignedIn();
+  return useQuery({
+    queryKey: inventoryKeys.lowStock(),
+    queryFn: () => api.listLowStockItems(),
+    enabled: signedIn && enabled,
+  });
 }
 
-/**
- * Look up a single inventory item by id. Receives the same shape the API
- * will return — the future implementation will read `/inventory/items/{id}`.
- */
-export function useInventoryItem(id: string | null | undefined): {
-  data: InventoryItem | null;
-  isLoading: boolean;
-  isError: boolean;
-} {
-  const data = useMemo(() => {
-    if (!id) return null;
-    return DEMO_INVENTORY_ITEMS.find((item) => item.id === id) ?? null;
-  }, [id]);
+export function useExpiringSoonItems(days: number, enabled: boolean) {
+  const signedIn = useSignedIn();
+  return useQuery({
+    queryKey: inventoryKeys.expiringSoon(days),
+    queryFn: () => api.listExpiringSoonItems(days),
+    enabled: signedIn && enabled,
+  });
+}
 
-  return { data, isLoading: false, isError: false };
+export function useInventoryItem(id: number | null | undefined) {
+  const enabled = useSignedIn() && Boolean(id);
+  return useQuery({
+    queryKey: inventoryKeys.detail(id ?? 0),
+    queryFn: () => api.getInventoryItem(id as number),
+    enabled,
+  });
+}
+
+export function useItemBatches(itemId: number | null | undefined) {
+  const enabled = useSignedIn() && Boolean(itemId);
+  return useQuery({
+    queryKey: inventoryKeys.batches(itemId ?? 0),
+    queryFn: () => api.listItemBatches(itemId as number).then((r) => r.results),
+    enabled,
+  });
+}
+
+export function useStockHistory(itemId: number | null | undefined) {
+  const enabled = useSignedIn() && Boolean(itemId);
+  return useQuery({
+    queryKey: inventoryKeys.stockHistory(itemId ?? 0),
+    queryFn: () => api.getStockHistory(itemId as number),
+    enabled,
+  });
+}
+
+export function useCreateItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: InventoryItemCreatePayload) => api.createInventoryItem(payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["inventory", "items"] }),
+  });
+}
+
+export function useUpdateItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: InventoryItemUpdatePayload }) =>
+      api.updateInventoryItem(id, payload),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: inventoryKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: ["inventory", "items", "list"] });
+      qc.invalidateQueries({ queryKey: inventoryKeys.lowStock() });
+    },
+  });
+}
+
+/** Soft-removal — the only "delete" exposed in the UI (real DELETE 500s once an item has history). */
+export function useDeactivateItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deactivateInventoryItem(id),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: inventoryKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: ["inventory", "items", "list"] });
+    },
+  });
+}
+
+function invalidateAfterStockChange(qc: ReturnType<typeof useQueryClient>, itemId: number) {
+  qc.invalidateQueries({ queryKey: inventoryKeys.detail(itemId) });
+  qc.invalidateQueries({ queryKey: inventoryKeys.batches(itemId) });
+  qc.invalidateQueries({ queryKey: inventoryKeys.stockHistory(itemId) });
+  qc.invalidateQueries({ queryKey: ["inventory", "items", "list"] });
+  qc.invalidateQueries({ queryKey: inventoryKeys.lowStock() });
+}
+
+export function useReceiveStock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: ReceiveStockPayload) => api.receiveStock(payload),
+    onSuccess: (_data, payload) => invalidateAfterStockChange(qc, payload.item),
+  });
+}
+
+export function useIssueStock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: IssueStockPayload) => api.issueStock(payload),
+    onSuccess: (_data, payload) => invalidateAfterStockChange(qc, payload.item),
+  });
+}
+
+export function useAdjustStock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: AdjustStockPayload) => api.adjustStock(payload),
+    onSuccess: (_data, payload) => invalidateAfterStockChange(qc, payload.item),
+  });
+}
+
+export function useAlerts(params?: { is_acknowledged?: boolean }) {
+  const enabled = useSignedIn();
+  return useQuery({
+    queryKey: inventoryKeys.alerts(params),
+    queryFn: () => api.listAlerts(params),
+    enabled,
+  });
+}
+
+export function useAcknowledgeAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.acknowledgeAlert(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["inventory", "alerts"] }),
+  });
 }
