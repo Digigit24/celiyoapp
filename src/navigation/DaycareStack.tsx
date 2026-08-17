@@ -2,6 +2,7 @@ import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { DaycareListScreen } from "../features/daycare/screens/DaycareListScreen";
 import { DaycareDetailScreen } from "../features/daycare/screens/DaycareDetailScreen";
+import { NewDaycareScreen } from "../features/daycare/screens/NewDaycareScreen";
 import type { DaycareStackParamList } from "../features/daycare/screens/DaycareListScreen";
 import { darkColors, lightColors } from "../theme/colors";
 import { useTheme } from "../theme/ThemeProvider";
@@ -15,6 +16,11 @@ export function DaycareStack() {
     <Stack.Navigator screenOptions={{ headerTintColor: c.foreground, headerStyle: { backgroundColor: c.card }, headerShadowVisible: false }}>
       <Stack.Screen name="DaycareList" component={DaycareListScreen} options={{ title: "Daycare" }} />
       <Stack.Screen name="DaycareDetail" component={DaycareDetailScreen} options={{ title: "Session" }} />
+      <Stack.Screen
+        name="NewDaycareSession"
+        component={NewDaycareScreen}
+        options={{ title: "New Daycare Session", presentation: "modal" }}
+      />
     </Stack.Navigator>
   );
 }
