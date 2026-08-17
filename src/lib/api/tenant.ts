@@ -5,22 +5,7 @@
  * values so whatsapp.ts can attach them as request headers for digicrm.
  * Same bearer JWT as everywhere else in the app (superadmin issues it).
  */
-import axios from "axios";
-import { AUTH_BASE_URL } from "../config";
-import { getAuthRuntime } from "../auth/authRuntime";
-
-const adminClient = axios.create({
-  baseURL: `${AUTH_BASE_URL}/api`,
-  timeout: 15_000,
-  headers: { "Content-Type": "application/json" },
-});
-
-adminClient.interceptors.request.use((config) => {
-  const token = getAuthRuntime().getAccessToken();
-  if (token) config.headers.set("Authorization", `Bearer ${token}`);
-  if (config.url && !config.url.endsWith("/")) config.url += "/";
-  return config;
-});
+import { adminClient } from "./adminClient";
 
 export interface TenantSettings {
   whatsapp_vendor_uid?: string;
