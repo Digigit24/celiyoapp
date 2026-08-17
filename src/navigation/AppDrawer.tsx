@@ -20,6 +20,7 @@ import { PatientsStack } from "./PatientsStack";
 import { OpdStack } from "./OpdStack";
 import { IpdStack } from "./IpdStack";
 import { AssistantScreen } from "../features/assistant/screens/AssistantScreen";
+import { ReputationScreen } from "../features/reputation/screens/ReputationScreen";
 import { SettingsScreen } from "../features/settings/screens/SettingsScreen";
 import { AnimatedTabBar, TAB_BAR_HEIGHT } from "./AnimatedTabBar";
 import { DrawerContent } from "./DrawerContent";
@@ -172,6 +173,11 @@ export function AppDrawer() {
             name="Assistant"
             component={AssistantScreen}
             options={{ headerShown: false, title: "Assistant" }}
+          />
+          <Drawer.Screen
+            name="Reputation"
+            component={ReputationScreen}
+            options={{ title: "Reputation" }}
           />
           <Drawer.Screen
             name="Settings"

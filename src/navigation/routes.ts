@@ -7,6 +7,7 @@ export type AppDrawerParamList = {
   Opd: undefined;
   Ipd: undefined;
   Assistant: undefined;
+  Reputation: undefined;
   Settings: undefined;
 };
 
@@ -17,6 +18,7 @@ export const STACK_ROUTES: Record<string, keyof AppDrawerParamList> = {
   opd: "Opd",
   ipd: "Ipd",
   assistant: "Assistant",
+  reputation: "Reputation",
   settings: "Settings",
 };
 

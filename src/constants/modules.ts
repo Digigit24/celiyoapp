@@ -160,6 +160,14 @@ export const MODULES: ModuleDef[] = [
     phase: 3,
   },
   {
+    id: "reputation",
+    label: "Reputation",
+    icon: "star-outline",
+    activeIcon: "star",
+    group: "administration",
+    permission: "hms.reputation.view",
+  },
+  {
     id: "settings",
     label: "Settings",
     icon: "settings-outline",
