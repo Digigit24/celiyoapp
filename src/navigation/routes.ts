@@ -6,6 +6,14 @@ export type AppDrawerParamList = {
   Patients: undefined;
   Opd: undefined;
   Ipd: undefined;
+  Daycare: undefined;
+  ClinicalRecords: undefined;
+  Mrd: undefined;
+  Payments: undefined;
+  Pharmacy: undefined;
+  Diagnostics: undefined;
+  Inventory: undefined;
+  Admin: undefined;
   Assistant: undefined;
   Reputation: undefined;
   Settings: undefined;
@@ -17,6 +25,14 @@ export const STACK_ROUTES: Record<string, keyof AppDrawerParamList> = {
   patients: "Patients",
   opd: "Opd",
   ipd: "Ipd",
+  daycare: "Daycare",
+  clinical: "ClinicalRecords",
+  mrd: "Mrd",
+  payments: "Payments",
+  pharmacy: "Pharmacy",
+  diagnostics: "Diagnostics",
+  inventory: "Inventory",
+  admin: "Admin",
   assistant: "Assistant",
   reputation: "Reputation",
   settings: "Settings",

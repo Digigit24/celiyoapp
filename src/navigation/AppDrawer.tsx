@@ -19,6 +19,14 @@ import { ModulePlaceholderScreen } from "../screens/ModulePlaceholderScreen";
 import { PatientsStack } from "./PatientsStack";
 import { OpdStack } from "./OpdStack";
 import { IpdStack } from "./IpdStack";
+import { DaycareStack } from "./DaycareStack";
+import { ClinicalRecordsStack } from "./ClinicalRecordsStack";
+import { MrdStack } from "./MrdStack";
+import { PaymentsStack } from "./PaymentsStack";
+import { PharmacyStack } from "./PharmacyStack";
+import { DiagnosticsStack } from "./DiagnosticsStack";
+import { InventoryStack } from "./InventoryStack";
+import { AdminStack } from "./AdminStack";
 import { AssistantScreen } from "../features/assistant/screens/AssistantScreen";
 import { ReputationScreen } from "../features/reputation/screens/ReputationScreen";
 import { SettingsScreen } from "../features/settings/screens/SettingsScreen";
@@ -168,6 +176,46 @@ export function AppDrawer() {
             name="Ipd"
             component={IpdStack}
             options={{ headerShown: false, title: "IPD" }}
+          />
+          <Drawer.Screen
+            name="Daycare"
+            component={DaycareStack}
+            options={{ headerShown: false, title: "Daycare" }}
+          />
+          <Drawer.Screen
+            name="ClinicalRecords"
+            component={ClinicalRecordsStack}
+            options={{ headerShown: false, title: "Clinical Records" }}
+          />
+          <Drawer.Screen
+            name="Mrd"
+            component={MrdStack}
+            options={{ headerShown: false, title: "MRD" }}
+          />
+          <Drawer.Screen
+            name="Payments"
+            component={PaymentsStack}
+            options={{ headerShown: false, title: "Payments" }}
+          />
+          <Drawer.Screen
+            name="Pharmacy"
+            component={PharmacyStack}
+            options={{ headerShown: false, title: "Pharmacy" }}
+          />
+          <Drawer.Screen
+            name="Diagnostics"
+            component={DiagnosticsStack}
+            options={{ headerShown: false, title: "Lab" }}
+          />
+          <Drawer.Screen
+            name="Inventory"
+            component={InventoryStack}
+            options={{ headerShown: false, title: "Inventory" }}
+          />
+          <Drawer.Screen
+            name="Admin"
+            component={AdminStack}
+            options={{ headerShown: false, title: "Admin" }}
           />
           <Drawer.Screen
             name="Assistant"
