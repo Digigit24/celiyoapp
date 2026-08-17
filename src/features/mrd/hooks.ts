@@ -1,74 +1,52 @@
 /**
- * MRD (Medical Records Department) hooks.
- *
- * __demo: true — for now these return the static fixtures from
- * `constants.ts`. The shape mirrors what a future API would return, so the
- * screens don't need to change when a live endpoint lands. Each hook just
- * swaps to a `useQuery({ queryFn: ... })` against `lib/api/mrd`.
- *
- * Filter / search are applied client-side over the demo data. A real API
- * would take these as query params, but the input contract stays identical.
+ * MRD hooks — worklist, dossier, export. Backed by the real dghms `/mrd/*`
+ * endpoints (`src/lib/api/mrd.ts`). No `hms.mrd.*` permission exists on this
+ * app — any signed-in user can use every hook here (see CLAUDE.md /
+ * ADMIN-vs-MRD backend-contract note), so there's no permission gating.
  */
-import { useMemo } from "react";
-import {
-  DEMO_MRD_FILES,
-  type MrdFileRecord,
-  type MrdFileStatus,
-} from "./constants";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useAuth } from "../../store/AuthContext";
+import * as api from "../../lib/api/mrd";
+import type { MrdExportCreatePayload } from "../../types/mrd";
 
-export interface UseMrdListParams {
-  /** Free-text search across patient name, id, and file number. */
-  search?: string;
-  /** Filter by status. `all` (or undefined) returns everything. */
-  status?: "all" | MrdFileStatus;
+function useSignedIn(): boolean {
+  return useAuth().status === "signedIn";
 }
 
-export interface UseMrdListResult {
-  data: MrdFileRecord[];
-  isLoading: boolean;
-  isError: boolean;
-  /** Subset of the dataset before filtering — useful for "showing X of Y". */
-  totalCount: number;
+export const mrdKeys = {
+  worklist: (params?: api.MrdWorklistParams) => ["mrd", "worklist", params ?? {}] as const,
+  dossier: (patientId: number, params?: api.MrdDossierParams) =>
+    ["mrd", "dossier", patientId, params ?? {}] as const,
+};
+
+/** Search-driven patient worklist — `search` omitted returns the 100 most recently updated patients. */
+export function useMrdWorklist(search?: string) {
+  const enabled = useSignedIn();
+  const params: api.MrdWorklistParams | undefined = search?.trim() ? { search: search.trim() } : undefined;
+  return useQuery({
+    queryKey: mrdKeys.worklist(params),
+    queryFn: () => api.getMrdWorklist(params),
+    enabled,
+  });
 }
 
-export function useMrdList(params: UseMrdListParams = {}): UseMrdListResult {
-  const { search, status = "all" } = params;
-
-  const filtered = useMemo(() => {
-    const q = search?.trim().toLowerCase() ?? "";
-    return DEMO_MRD_FILES.filter((f) => {
-      if (status !== "all" && f.status !== status) return false;
-      if (q.length === 0) return true;
-      return (
-        f.patientName.toLowerCase().includes(q) ||
-        f.patientId.toLowerCase().includes(q) ||
-        f.fileNumber.toLowerCase().includes(q) ||
-        f.currentCustody.toLowerCase().includes(q)
-      );
-    });
-  }, [search, status]);
-
-  return {
-    data: filtered,
-    isLoading: false,
-    isError: false,
-    totalCount: DEMO_MRD_FILES.length,
-  };
+/** A patient's dossier — encounters + document checklist + completeness, optionally scoped to one encounter. */
+export function useMrdDossier(patientId: number | null | undefined, params?: api.MrdDossierParams) {
+  const enabled = useSignedIn() && Boolean(patientId);
+  return useQuery({
+    queryKey: mrdKeys.dossier(patientId ?? 0, params),
+    queryFn: () => api.getMrdDossier(patientId as number, params),
+    enabled,
+  });
 }
 
 /**
- * Look up a single file record by id. Receives the same shape a future API
- * would return — the eventual implementation will read `/mrd/{id}`.
+ * Fully synchronous — the mutation result already reflects "completed" or
+ * "failed". No query to invalidate: there's no export-history endpoint to
+ * refetch from (track past exports in the calling screen's local state).
  */
-export function useMrdFile(id: string | null | undefined): {
-  data: MrdFileRecord | null;
-  isLoading: boolean;
-  isError: boolean;
-} {
-  const data = useMemo(() => {
-    if (!id) return null;
-    return DEMO_MRD_FILES.find((f) => f.id === id) ?? null;
-  }, [id]);
-
-  return { data, isLoading: false, isError: false };
+export function useCreateMrdExport() {
+  return useMutation({
+    mutationFn: (payload: MrdExportCreatePayload) => api.createMrdExport(payload),
+  });
 }

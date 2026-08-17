@@ -1,27 +1,25 @@
-import React, { useLayoutEffect } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import React, { useLayoutEffect, useState } from "react";
+import { ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Avatar,
+  BottomSheet,
+  Button,
   Card,
   Chip,
+  EmptyState,
+  Input,
   KeyValueRow,
   SectionHeader,
-  StatTile,
-  TimelineRow,
+  SkeletonList,
+  useToast,
 } from "../../../components/ui";
 import { TAB_BAR_CONTENT_INSET } from "../../../navigation/AppDrawer";
-import {
-  daysSince,
-  formatDate,
-  formatTenure,
-  STAFF_ROLE_LABELS,
-  STAFF_STATUS_CHIP_VARIANT,
-  STAFF_STATUS_LABELS,
-} from "../constants";
-import { useStaffMember } from "../hooks";
+import { useAuth } from "../../../store/AuthContext";
+import { formatDate, formatTenure, staffDisplayName } from "../constants";
+import { useDeactivateStaff, useDeleteStaff, useStaffMember } from "../hooks";
 import type { AdminStackParamList } from "./AdminListScreen";
 
 type Props = NativeStackScreenProps<AdminStackParamList, "AdminDetail">;
@@ -29,214 +27,238 @@ type Props = NativeStackScreenProps<AdminStackParamList, "AdminDetail">;
 export function AdminDetailScreen({ route, navigation }: Props) {
   const { staffId } = route.params;
   const insets = useSafeAreaInsets();
-  const { data: staff, isLoading } = useStaffMember(staffId);
+  const toast = useToast();
+  const { can, session } = useAuth();
+  const canManage = can("admin.full_access.enabled");
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+
+  const { data: staff, isLoading, isError, refetch } = useStaffMember(staffId);
+  const deactivate = useDeactivateStaff();
+  const deleteStaff = useDeleteStaff();
+
+  const name = staff ? staffDisplayName(staff) : "";
 
   useLayoutEffect(() => {
     if (staff) {
       navigation.setOptions({
-        title: staff.employeeId,
-        headerRight: () => (
-          <View className="pr-1">
-            <Chip
-              label={STAFF_STATUS_LABELS[staff.status]}
-              variant={STAFF_STATUS_CHIP_VARIANT[staff.status]}
-            />
-          </View>
-        ),
+        title: name,
+        headerRight: () =>
+          canManage ? (
+            <View className="pr-1">
+              <Chip
+                label={staff.is_active ? "Active" : "Inactive"}
+                variant={staff.is_active ? "success" : "neutral"}
+              />
+            </View>
+          ) : null,
       });
     }
-  }, [navigation, staff]);
+  }, [navigation, staff, name, canManage]);
 
   if (isLoading) {
     return (
-      <View className="flex-1 items-center justify-center bg-background">
-        <ActivityIndicator />
+      <View className="flex-1 bg-background">
+        <SkeletonList rows={6} />
       </View>
     );
   }
 
-  if (!staff) {
+  if (isError || !staff) {
     return (
-      <View className="flex-1 items-center justify-center bg-background px-6">
-        <Text className="text-base font-semibold text-foreground">
-          Staff member not found
-        </Text>
-        <Text className="mt-1 text-sm text-muted-foreground text-center">
-          The account may have been removed. Try going back to the list.
-        </Text>
+      <View className="flex-1 bg-background px-4 pt-8">
+        <EmptyState
+          icon="alert-circle-outline"
+          title="Staff member not found"
+          message="The account may have been removed, or the request failed. Try again."
+          action={<Button title="Retry" onPress={() => refetch()} fullWidth={false} />}
+        />
       </View>
     );
   }
 
-  const lastActiveDaysAgo = daysSince(staff.lastActiveDate);
+  const isSelf = staff.id === session?.userId;
+
+  function handleToggleActive() {
+    if (!staff) return;
+    deactivate.mutate(
+      { id: staff.id, isActive: !staff.is_active },
+      {
+        onSuccess: () => toast.show(staff.is_active ? "Staff member deactivated" : "Staff member reactivated", "success"),
+        onError: () => toast.show("Couldn't update the account", "error"),
+      }
+    );
+  }
+
+  function handleConfirmDelete() {
+    if (!staff || confirmText.trim().toLowerCase() !== staff.email.toLowerCase()) return;
+    deleteStaff.mutate(staff.id, {
+      onSuccess: () => {
+        toast.show("Staff member deleted", "success");
+        setConfirmOpen(false);
+        navigation.goBack();
+      },
+      onError: () => toast.show("Couldn't delete the account", "error"),
+    });
+  }
 
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      contentContainerStyle={{
-        paddingBottom: TAB_BAR_CONTENT_INSET + insets.bottom + 24,
-        gap: 16,
-      }}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Identity header */}
-      <View className="px-4 pt-4">
-        <Card padded={false}>
-          <View className="flex-row items-center gap-3 p-4">
-            <Avatar source={staff.name} size="lg" />
-            <View className="flex-1 gap-1">
-              <Text className="text-base font-semibold text-foreground" numberOfLines={1}>
-                {staff.name}
-              </Text>
-              <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-                {STAFF_ROLE_LABELS[staff.role]} · {staff.employeeId}
-              </Text>
-              <View className="flex-row items-center gap-1.5 pt-1">
-                <Chip
-                  label={STAFF_STATUS_LABELS[staff.status]}
-                  variant={STAFF_STATUS_CHIP_VARIANT[staff.status]}
-                />
-                <Chip label={staff.department} variant="neutral" />
+    <View className="flex-1 bg-background">
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{
+          paddingBottom: (canManage ? 96 : 24) + TAB_BAR_CONTENT_INSET + insets.bottom,
+          gap: 16,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Identity header */}
+        <View className="px-4 pt-4">
+          <Card padded={false}>
+            <View className="flex-row items-center gap-3 p-4">
+              <Avatar source={name} size="lg" />
+              <View className="flex-1 gap-1">
+                <Text className="text-base font-semibold text-foreground" numberOfLines={1}>
+                  {name}
+                </Text>
+                <Text className="text-xs text-muted-foreground" numberOfLines={1}>
+                  {staff.email}
+                </Text>
+                <View className="flex-row items-center gap-1.5 pt-1 flex-wrap">
+                  <Chip label={staff.is_active ? "Active" : "Inactive"} variant={staff.is_active ? "success" : "neutral"} />
+                  {staff.is_super_admin ? <Chip label="Super Admin" variant="info" /> : null}
+                  {isSelf ? <Chip label="You" variant="neutral" /> : null}
+                </View>
               </View>
             </View>
-          </View>
-          <View className="border-t border-border/60 px-1">
-            <KeyValueRow label="Email" value={staff.email} />
-            <KeyValueRow label="Phone" value={staff.phone} />
-            <KeyValueRow label="Joined" value={formatDate(staff.joinedDate)} />
-          </View>
-        </Card>
-      </View>
-
-      {/* Quick stats */}
-      <View className="px-4">
-        <View className="flex-row gap-2">
-          <View className="flex-1">
-            <StatTile
-              icon="shield-checkmark-outline"
-              label="Modules granted"
-              value={staff.permissions.length}
-              tint="blue"
-            />
-          </View>
-          <View className="flex-1">
-            <StatTile
-              icon="briefcase-outline"
-              label="Tenure"
-              value={formatTenure(staff.joinedDate)}
-              tint="emerald"
-            />
-          </View>
-        </View>
-        <View className="flex-row gap-2 mt-2">
-          <View className="flex-1">
-            <StatTile
-              icon="time-outline"
-              label="Last active"
-              value={lastActiveDaysAgo <= 0 ? "Today" : `${lastActiveDaysAgo}d ago`}
-              tint={lastActiveDaysAgo > 14 ? "amber" : "slate"}
-            />
-          </View>
-          <View className="flex-1">
-            <StatTile
-              icon="git-branch-outline"
-              label="Activity events"
-              value={staff.timeline.length}
-              tint="violet"
-            />
-          </View>
-        </View>
-      </View>
-
-      {/* Contact / info */}
-      <View>
-        <SectionHeader title="Contact & info" />
-        <View className="px-4">
-          <Card padded={false}>
-            <View className="px-1">
-              <KeyValueRow label="Department" value={staff.department} />
-              <KeyValueRow label="Role" value={STAFF_ROLE_LABELS[staff.role]} />
-              <KeyValueRow
-                label="Email"
-                value={staff.email}
-                action={{ icon: "mail-outline", onPress: () => {}, label: "Email staff" }}
-              />
-              <KeyValueRow
-                label="Phone"
-                value={staff.phone}
-                action={{ icon: "call-outline", onPress: () => {}, label: "Call staff" }}
-              />
+            <View className="border-t border-border/60 px-1">
+              <KeyValueRow label="Phone" value={staff.phone || "—"} />
+              <KeyValueRow label="Timezone" value={staff.timezone || "—"} />
+              <KeyValueRow label="Joined" value={formatDate(staff.date_joined)} />
+              <KeyValueRow label="Tenure" value={formatTenure(staff.date_joined)} />
             </View>
           </Card>
         </View>
-      </View>
 
-      {/* Permissions summary — read-only module access grants */}
-      <View>
-        <SectionHeader
-          title="Module access"
-          count={`${staff.permissions.length} module${staff.permissions.length === 1 ? "" : "s"}`}
-        />
-        <View className="px-4">
-          <Card>
-            <View className="flex-row flex-wrap gap-1.5">
-              {staff.permissions.map((moduleLabel) => (
-                <Chip key={moduleLabel} label={moduleLabel} variant="info" />
-              ))}
-            </View>
-            <Text className="mt-3 text-xs text-muted-foreground">
-              Read-only here. Granting or revoking module access happens on
-              the web admin panel.
+        {/* Roles */}
+        <View>
+          <SectionHeader title="Roles" count={staff.roles.length} />
+          <View className="px-4">
+            <Card>
+              {staff.roles.length === 0 ? (
+                <Text className="text-sm text-muted-foreground">No roles assigned.</Text>
+              ) : (
+                <View className="gap-3">
+                  {staff.roles.map((role) => (
+                    <View key={role.id} className="flex-row items-center justify-between gap-2">
+                      <View className="flex-1">
+                        <Text className="text-sm font-semibold text-foreground" numberOfLines={1}>
+                          {role.name}
+                        </Text>
+                        {role.description ? (
+                          <Text className="text-xs text-muted-foreground" numberOfLines={2}>
+                            {role.description}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Chip label={role.is_active ? "Active" : "Inactive"} variant={role.is_active ? "success" : "neutral"} />
+                    </View>
+                  ))}
+                </View>
+              )}
+            </Card>
+          </View>
+        </View>
+
+        {/* Account info */}
+        <View>
+          <SectionHeader title="Account" />
+          <View className="px-4">
+            <Card padded={false}>
+              <View className="px-1">
+                <KeyValueRow label="Tenant" value={staff.tenant_name || "—"} />
+                <KeyValueRow label="User ID" value={staff.id} />
+              </View>
+            </Card>
+            <Text className="mt-2 text-xs text-muted-foreground">
+              No department, last-login, or invite-status fields exist for this account on the
+              backend — only what's shown here is real.
             </Text>
-          </Card>
+          </View>
         </View>
-      </View>
+      </ScrollView>
 
-      {/* Activity timeline */}
-      <View>
-        <SectionHeader
-          title="Account activity"
-          count={`${staff.timeline.length} event${staff.timeline.length === 1 ? "" : "s"}`}
-        />
-        <View className="px-4">
-          <Card padded={false}>
-            <View className="p-4">
-              {staff.timeline.map((event, i) => (
-                <TimelineRow
-                  key={`${event.title}-${i}`}
-                  title={event.title}
-                  subtitle={event.subtitle}
-                  when={event.when}
-                  tint={event.tint}
-                  icon={event.icon}
-                  isLast={i === staff.timeline.length - 1}
-                />
-              ))}
-            </View>
-          </Card>
-        </View>
-      </View>
-
-      {/* Phase 3 nudge — honest "coming soon" footer for live actions */}
-      <View className="px-4">
-        <Card>
-          <View className="flex-row items-center gap-3">
-            <View className="h-9 w-9 items-center justify-center rounded-full bg-amber-50">
-              <Ionicons name="construct-outline" size={18} color="#92400e" />
+      {/* Sticky action footer — write actions gated on admin.full_access.enabled */}
+      {canManage ? (
+        <View className="border-t border-border bg-card px-4 pt-3 gap-2" style={{ paddingBottom: insets.bottom + 12 }}>
+          <View className="flex-row gap-2">
+            <View className="flex-1">
+              <Button
+                title="Edit"
+                variant="outline"
+                onPress={() => navigation.navigate("NewStaff", { staffId: staff.id })}
+                icon={<Ionicons name="create-outline" size={16} color="#0f172a" />}
+              />
             </View>
             <View className="flex-1">
-              <Text className="text-sm font-semibold text-foreground">
-                Account management arrives in Phase 3
-              </Text>
-              <Text className="mt-0.5 text-xs text-muted-foreground" numberOfLines={2}>
-                Editing roles, resending invites, and deactivating accounts
-                ship with the Phase 3 admin integration. Auth and permissions
-                are already wired.
-              </Text>
+              <Button
+                title={staff.is_active ? "Deactivate" : "Reactivate"}
+                variant={staff.is_active ? "secondary" : "primary"}
+                onPress={handleToggleActive}
+                loading={deactivate.isPending}
+                disabled={isSelf}
+                icon={
+                  <Ionicons
+                    name={staff.is_active ? "person-remove-outline" : "person-add-outline"}
+                    size={16}
+                    color={staff.is_active ? "#0f172a" : "#ffffff"}
+                  />
+                }
+              />
             </View>
           </View>
-        </Card>
-      </View>
-    </ScrollView>
+          <Button
+            title="Delete account"
+            variant="destructive"
+            onPress={() => {
+              setConfirmText("");
+              setConfirmOpen(true);
+            }}
+            disabled={isSelf}
+            icon={<Ionicons name="trash-outline" size={16} color="#ffffff" />}
+          />
+          {isSelf ? (
+            <Text className="text-center text-[11px] text-muted-foreground">
+              You can't deactivate or delete your own account from here.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      <BottomSheet visible={confirmOpen} onClose={() => setConfirmOpen(false)} title="Delete staff account">
+        <View className="gap-3 pb-2">
+          <Text className="text-sm text-muted-foreground">
+            This permanently deletes {name}'s account. This can't be undone, and the backend has
+            no safety net (no active-session check, no "last admin" guard). Type{" "}
+            <Text className="font-mono text-foreground">{staff.email}</Text> to confirm.
+          </Text>
+          <Input
+            placeholder={staff.email}
+            value={confirmText}
+            onChangeText={setConfirmText}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Button
+            title="Permanently delete"
+            variant="destructive"
+            onPress={handleConfirmDelete}
+            loading={deleteStaff.isPending}
+            disabled={confirmText.trim().toLowerCase() !== staff.email.toLowerCase()}
+          />
+        </View>
+      </BottomSheet>
+    </View>
   );
 }
