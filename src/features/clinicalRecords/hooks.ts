@@ -1,77 +1,67 @@
 /**
- * Clinical Records hooks.
- *
- * __demo: true — for now these return the static fixtures from
- * `constants.ts`. The shape mirrors what a future API would return, so the
- * screens don't need to change when a live endpoint lands. Each hook just
- * swaps to a `useQuery({ queryFn: ... })` against `lib/api/clinicalRecords`.
- *
- * Filter / search are applied client-side over the demo data. A real API
- * would take these as query params, but the input contract stays identical.
+ * Clinical Records hooks — TanStack Query wrappers around
+ * `src/lib/api/clinicalRecords.ts`. Read + lock/unlock/complete/delete only
+ * — there is no create mutation here (records are created from inside an
+ * OPD/IPD encounter via the live EMR engine, `src/features/clinical/`).
  */
-import { useMemo } from "react";
-import {
-  DEMO_CLINICAL_RECORDS,
-  type ClinicalRecordEncounterType,
-  type ClinicalRecordEntry,
-} from "./constants";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as api from "../../lib/api/clinicalRecords";
+import { useAuth } from "../../store/AuthContext";
 
-export interface UseClinicalRecordsListParams {
-  /** Free-text search across patient name, id, record ref, and record name. */
-  search?: string;
-  /** Filter by encounter type. `all` (or undefined) returns everything. */
-  encounterType?: "all" | ClinicalRecordEncounterType;
+function useSignedIn(): boolean {
+  return useAuth().status === "signedIn";
 }
 
-export interface UseClinicalRecordsListResult {
-  data: ClinicalRecordEntry[];
-  isLoading: boolean;
-  isError: boolean;
-  /** Subset of the dataset before filtering — useful for "showing X of Y". */
-  totalCount: number;
+export const clinicalRecordsKeys = {
+  list: (params?: api.ClinicalRecordListParams) => ["clinicalRecords", "list", params ?? {}] as const,
+  detail: (id: number) => ["clinicalRecords", "detail", id] as const,
+};
+
+export function useClinicalRecordsList(params?: api.ClinicalRecordListParams) {
+  const enabled = useSignedIn();
+  return useQuery({
+    queryKey: clinicalRecordsKeys.list(params),
+    queryFn: () => api.listClinicalRecords(params),
+    enabled,
+  });
 }
 
-export function useClinicalRecordsList(
-  params: UseClinicalRecordsListParams = {}
-): UseClinicalRecordsListResult {
-  const { search, encounterType = "all" } = params;
-
-  const filtered = useMemo(() => {
-    const q = search?.trim().toLowerCase() ?? "";
-    return DEMO_CLINICAL_RECORDS.filter((r) => {
-      if (encounterType !== "all" && r.encounterType !== encounterType) return false;
-      if (q.length === 0) return true;
-      return (
-        r.patientName.toLowerCase().includes(q) ||
-        r.patientId.toLowerCase().includes(q) ||
-        r.recordRef.toLowerCase().includes(q) ||
-        r.recordName.toLowerCase().includes(q) ||
-        r.encounterRef.toLowerCase().includes(q)
-      );
-    });
-  }, [search, encounterType]);
-
-  return {
-    data: filtered,
-    isLoading: false,
-    isError: false,
-    totalCount: DEMO_CLINICAL_RECORDS.length,
-  };
+export function useClinicalRecord(id: number | null | undefined) {
+  const enabled = useSignedIn() && Boolean(id);
+  return useQuery({
+    queryKey: clinicalRecordsKeys.detail(id ?? 0),
+    queryFn: () => api.getClinicalRecord(id as number),
+    enabled,
+  });
 }
 
-/**
- * Look up a single record by id. Receives the same shape a future API would
- * return — the eventual implementation will read `/clinical-records/{id}`.
- */
-export function useClinicalRecord(id: string | null | undefined): {
-  data: ClinicalRecordEntry | null;
-  isLoading: boolean;
-  isError: boolean;
-} {
-  const data = useMemo(() => {
-    if (!id) return null;
-    return DEMO_CLINICAL_RECORDS.find((r) => r.id === id) ?? null;
-  }, [id]);
+function useRecordAction(mutationFn: (id: number) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: clinicalRecordsKeys.detail(id as number) });
+      qc.invalidateQueries({ queryKey: ["clinicalRecords", "list"] });
+    },
+  });
+}
 
-  return { data, isLoading: false, isError: false };
+export function useLockRecord() {
+  return useRecordAction(api.lockClinicalRecord);
+}
+
+export function useUnlockRecord() {
+  return useRecordAction(api.unlockClinicalRecord);
+}
+
+export function useCompleteRecord() {
+  return useRecordAction(api.completeClinicalRecord);
+}
+
+export function useDeleteRecord() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteClinicalRecord(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["clinicalRecords", "list"] }),
+  });
 }

@@ -3,49 +3,41 @@ import { FlatList, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
-import {
-  Chip,
-  EmptyState,
-  SearchHeader,
-  FilterBar,
-  Card,
-} from "../../../components/ui";
+import { Chip, EmptyState, SearchHeader, FilterBar, Card, Skeleton } from "../../../components/ui";
 import { TAB_BAR_CONTENT_INSET } from "../../../navigation/AppDrawer";
 import {
-  CLINICAL_RECORDS_FILTER_OPTIONS,
-  ENCOUNTER_TYPE_CHIP_VARIANT,
-  ENCOUNTER_TYPE_LABELS,
-  formatRecordDate,
-  LOCK_STATUS_CHIP_VARIANT,
-  LOCK_STATUS_LABELS,
-  type ClinicalRecordEncounterType,
-  type ClinicalRecordEntry,
+  ENCOUNTER_FILTER_OPTIONS,
+  encounterTypeChipVariant,
+  encounterTypeLabel,
+  formatDateTime,
+  STATUS_CHIP_VARIANT,
+  STATUS_FILTER_OPTIONS,
+  STATUS_LABELS,
+  truncateId,
 } from "../constants";
 import { useClinicalRecordsList } from "../hooks";
+import type {
+  ClinicalRecordEncounterType,
+  ClinicalRecordListItem,
+  ClinicalRecordStatus,
+} from "../../../types/clinicalRecords";
 
 /**
- * Param list for the future Clinical Records stack. The orchestrator owns
- * the actual stack registration; exporting the type here keeps the contract
- * typed.
+ * Param list for the Clinical Records stack, registered in
+ * `src/navigation/ClinicalRecordsStack.tsx`.
  */
 export type ClinicalRecordsStackParamList = {
   ClinicalRecordsList: undefined;
-  ClinicalRecordsDetail: { recordId: string };
+  ClinicalRecordsDetail: { recordId: number };
 };
 
 type Props = NativeStackScreenProps<ClinicalRecordsStackParamList, "ClinicalRecordsList">;
 
-function ClinicalRecordRow({
-  record,
-  onPress,
-}: {
-  record: ClinicalRecordEntry;
-  onPress: () => void;
-}) {
+function ClinicalRecordRow({ record, onPress }: { record: ClinicalRecordListItem; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open clinical record ${record.recordRef}`}
+      accessibilityLabel={`Open clinical record ${record.form_name}`}
       onPress={onPress}
       className="active:opacity-90"
     >
@@ -55,29 +47,23 @@ function ClinicalRecordRow({
         </View>
         <View className="flex-1 gap-1">
           <View className="flex-row items-center gap-2">
-            <Text
-              className="text-[15px] font-semibold text-foreground"
-              numberOfLines={1}
-            >
-              {record.patientName}
+            <Text className="text-[15px] font-semibold text-foreground" numberOfLines={1}>
+              {record.form_name}
             </Text>
             <Chip
-              label={ENCOUNTER_TYPE_LABELS[record.encounterType]}
-              variant={ENCOUNTER_TYPE_CHIP_VARIANT[record.encounterType]}
+              label={encounterTypeLabel(record.encounter_type)}
+              variant={encounterTypeChipVariant(record.encounter_type)}
             />
           </View>
           <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-            {record.recordName} · {formatRecordDate(record.date)}
+            {record.encounter_type} #{record.encounter_id} · {formatDateTime(record.created_at)}
           </Text>
           <Text className="font-mono text-[10px] text-muted-foreground" numberOfLines={1}>
-            {record.recordRef} · {record.doctor}
+            {record.form_code} · Patient {truncateId(record.patient_user_id)}
           </Text>
         </View>
         <View className="items-end gap-0.5">
-          <Chip
-            label={LOCK_STATUS_LABELS[record.lockStatus]}
-            variant={LOCK_STATUS_CHIP_VARIANT[record.lockStatus]}
-          />
+          <Chip label={STATUS_LABELS[record.status]} variant={STATUS_CHIP_VARIANT[record.status]} />
         </View>
       </Card>
     </Pressable>
@@ -88,72 +74,97 @@ export function ClinicalRecordsListScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
   const [encounterType, setEncounterType] = useState<"all" | ClinicalRecordEncounterType>("all");
+  const [status, setStatus] = useState<"all" | ClinicalRecordStatus>("all");
 
-  const { data, totalCount } = useClinicalRecordsList({
-    search: query,
-    encounterType,
+  const { data, isLoading, isError, refetch, isRefetching } = useClinicalRecordsList({
+    search: query.trim() || undefined,
+    encounter_type: encounterType === "all" ? undefined : (encounterType as "opd_visit" | "ipd_admission"),
+    status: status === "all" ? undefined : status,
   });
+  const records = data?.results ?? [];
 
   const headerSubtitle = useMemo(() => {
-    if (query.length === 0 && encounterType === "all") {
-      return `${data.length} of ${totalCount} records`;
-    }
-    return `${data.length} match${data.length === 1 ? "" : "es"}`;
-  }, [data.length, query.length, encounterType, totalCount]);
+    if (!data) return "";
+    return `${records.length} of ${data.count} record${data.count === 1 ? "" : "s"}`;
+  }, [data, records.length]);
 
   return (
     <View className="flex-1 bg-background">
-      <SearchHeader
-        value={query}
-        onChange={setQuery}
-        placeholder="Search patient, record, or ref"
-      />
+      <SearchHeader value={query} onChange={setQuery} placeholder="Search encounter, form name, or code" />
       <FilterBar
-        options={CLINICAL_RECORDS_FILTER_OPTIONS}
+        options={ENCOUNTER_FILTER_OPTIONS}
         value={encounterType}
         onChange={(id) => setEncounterType(id as "all" | ClinicalRecordEncounterType)}
       />
-
-      <FlatList
-        data={data}
-        keyExtractor={(item) => String(item.id)}
-        contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingTop: 4,
-          paddingBottom: TAB_BAR_CONTENT_INSET + insets.bottom + 24,
-          gap: 10,
-        }}
-        ListHeaderComponent={
-          <View className="flex-row items-center justify-between pb-2">
-            <Text className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              Clinical Records
-            </Text>
-            <Text className="text-[11px] font-semibold text-muted-foreground/70">
-              {headerSubtitle}
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <ClinicalRecordRow
-            record={item}
-            onPress={() =>
-              navigation.navigate("ClinicalRecordsDetail", { recordId: item.id })
-            }
-          />
-        )}
-        ItemSeparatorComponent={() => <View className="h-2" />}
-        ListEmptyComponent={
-          <EmptyState
-            icon="document-text-outline"
-            title="No clinical records found"
-            message={
-              query.length > 0
-                ? "Try a different search or encounter filter."
-                : "Consultation notes, discharge summaries, and reports across encounters will appear here."
-            }
-          />
-        }
+      <FilterBar
+        options={STATUS_FILTER_OPTIONS}
+        value={status}
+        onChange={(id) => setStatus(id as "all" | ClinicalRecordStatus)}
       />
+
+      {isLoading ? (
+        <View className="px-4 gap-2 pt-2">
+          <Skeleton className="h-20 rounded-2xl" />
+          <Skeleton className="h-20 rounded-2xl" />
+          <Skeleton className="h-20 rounded-2xl" />
+        </View>
+      ) : (
+        <FlatList
+          data={records}
+          keyExtractor={(item) => String(item.id)}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingTop: 4,
+            paddingBottom: TAB_BAR_CONTENT_INSET + insets.bottom + 24,
+            gap: 10,
+          }}
+          refreshing={isRefetching}
+          onRefresh={refetch}
+          ListHeaderComponent={
+            <View className="flex-row items-center justify-between pb-2">
+              <Text className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Clinical Records
+              </Text>
+              <Text className="text-[11px] font-semibold text-muted-foreground/70">{headerSubtitle}</Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <ClinicalRecordRow
+              record={item}
+              onPress={() => navigation.navigate("ClinicalRecordsDetail", { recordId: item.id })}
+            />
+          )}
+          ItemSeparatorComponent={() => <View className="h-2" />}
+          ListEmptyComponent={
+            isError ? (
+              <EmptyState
+                icon="alert-circle-outline"
+                title="Couldn't load clinical records"
+                message="Check your connection and try again."
+                action={
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => refetch()}
+                    className="rounded-lg bg-primary px-4 py-2"
+                  >
+                    <Text className="text-sm font-semibold text-primary-foreground">Retry</Text>
+                  </Pressable>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon="document-text-outline"
+                title="No clinical records found"
+                message={
+                  query.length > 0
+                    ? "Try a different search or filter."
+                    : "Records created from OPD/IPD encounters will appear here."
+                }
+              />
+            )
+          }
+        />
+      )}
     </View>
   );
 }
