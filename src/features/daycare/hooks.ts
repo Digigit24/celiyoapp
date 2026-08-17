@@ -1,75 +1,70 @@
 /**
- * Daycare hooks.
- *
- * __demo: true — for now these return the static fixtures from
- * `constants.ts`. The shape mirrors what a future API would return, so the
- * screens don't need to change when a live endpoint lands. Each hook just
- * swaps to a `useQuery({ queryFn: ... })` against `lib/api/daycare`.
- *
- * Filter / search are applied client-side over the demo data. A real API
- * would take these as query params, but the input contract stays identical.
+ * Daycare hooks — thin wrappers around the real IPD admission hooks
+ * (`features/ipd/hooks.ts`) with `admission_type=daycare` baked in. There is
+ * no separate Daycare backend or API module: a daycare session IS an
+ * `/api/ipd/admissions` row, so we reuse `useAdmissions`/`useAdmission`/
+ * `useCreateAdmission`/`useUpdateRegistration`/`useDischargeAdmission`
+ * rather than reimplementing admission mutations from scratch.
  */
-import { useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import type { AdmissionListParams } from "../../lib/api/ipd";
 import {
-  DEMO_DAYCARE_SESSIONS,
-  type DaycareSession,
-  type DaycareStatus,
-} from "./constants";
+  ipdKeys,
+  useAdmission,
+  useAdmissions,
+  useCreateAdmission,
+  useDischargeAdmission,
+  useUpdateRegistration,
+} from "../ipd/hooks";
+import type { AdmissionCreatePayload, DischargePayload } from "../../types/ipd";
 
-export interface UseDaycareListParams {
-  /** Free-text search across patient name, id, and session ref. */
-  search?: string;
-  /** Filter by status. `all` (or undefined) returns everything. */
-  status?: "all" | DaycareStatus;
+export interface DaycareListParams
+  extends Omit<AdmissionListParams, "admission_type"> {}
+
+/** Admission list, always forced to `admission_type=daycare`. */
+export function useDaycareList(params?: DaycareListParams) {
+  return useAdmissions({ ...params, admission_type: "daycare" });
 }
 
-export interface UseDaycareListResult {
-  data: DaycareSession[];
-  isLoading: boolean;
-  isError: boolean;
-  /** Subset of the dataset before filtering — useful for "showing X of Y". */
-  totalCount: number;
-}
-
-export function useDaycareList(
-  params: UseDaycareListParams = {}
-): UseDaycareListResult {
-  const { search, status = "all" } = params;
-
-  const filtered = useMemo(() => {
-    const q = search?.trim().toLowerCase() ?? "";
-    return DEMO_DAYCARE_SESSIONS.filter((s) => {
-      if (status !== "all" && s.status !== status) return false;
-      if (q.length === 0) return true;
-      return (
-        s.patientName.toLowerCase().includes(q) ||
-        s.patientId.toLowerCase().includes(q) ||
-        s.sessionRef.toLowerCase().includes(q)
-      );
-    });
-  }, [search, status]);
-
-  return {
-    data: filtered,
-    isLoading: false,
-    isError: false,
-    totalCount: DEMO_DAYCARE_SESSIONS.length,
-  };
+/** Admission detail by id — same resource/endpoint as IPD, no daycare-specific filtering. */
+export function useDaycareSession(id: number | null | undefined) {
+  return useAdmission(id);
 }
 
 /**
- * Look up a single session by id. Receives the same shape a future API
- * would return — the eventual implementation will read `/daycare/{id}`.
+ * Create a daycare admission. `AdmissionCreatePayload` has no `admission_type`
+ * field (the create endpoint doesn't accept one) — matching
+ * `NewIpdAdmissionScreen`'s pattern, the type is set with a follow-up
+ * `PATCH .../registration` call after the admission is created.
  */
-export function useDaycareSession(id: string | null | undefined): {
-  data: DaycareSession | null;
-  isLoading: boolean;
-  isError: boolean;
-} {
-  const data = useMemo(() => {
-    if (!id) return null;
-    return DEMO_DAYCARE_SESSIONS.find((s) => s.id === id) ?? null;
-  }, [id]);
+export function useCreateDaycareAdmission() {
+  const createAdmission = useCreateAdmission();
+  const updateRegistration = useUpdateRegistration();
+  const qc = useQueryClient();
 
-  return { data, isLoading: false, isError: false };
+  async function mutateAsync(payload: AdmissionCreatePayload) {
+    const admission = await createAdmission.mutateAsync(payload);
+    try {
+      await updateRegistration.mutateAsync({
+        id: admission.id,
+        payload: { admission_type: "daycare" },
+      });
+    } finally {
+      qc.invalidateQueries({ queryKey: ipdKeys.detail(admission.id) });
+      qc.invalidateQueries({ queryKey: ["ipd", "admissions", "list"] });
+    }
+    return admission;
+  }
+
+  return {
+    mutateAsync,
+    isPending: createAdmission.isPending || updateRegistration.isPending,
+  };
 }
+
+/** Discharge a daycare admission — identical mutation to IPD's discharge. */
+export function useDischargeDaycareAdmission() {
+  return useDischargeAdmission();
+}
+
+export type { DischargePayload };

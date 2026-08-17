@@ -1,26 +1,29 @@
-import React, { useLayoutEffect } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import React, { useLayoutEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Avatar,
+  Badge,
+  Button,
   Card,
-  Chip,
+  InlineError,
+  Input,
   KeyValueRow,
   SectionHeader,
-  StatTile,
-  TimelineRow,
+  useToast,
 } from "../../../components/ui";
 import { TAB_BAR_CONTENT_INSET } from "../../../navigation/AppDrawer";
+import { useDoctors } from "../../../hooks/masters";
 import {
-  DAYCARE_SESSION_TYPE_LABELS,
-  DAYCARE_STATUS_CHIP_VARIANT,
+  ADMISSION_STATUS_VARIANT,
   DAYCARE_STATUS_LABELS,
-  DEMO_DAYCARE_QUICK_STATS,
+  daycareDischargeValidationError,
   formatDaycareDate,
 } from "../constants";
-import { useDaycareSession } from "../hooks";
+import { useDaycareSession, useDischargeDaycareAdmission } from "../hooks";
+import { DISCHARGE_TYPE_OPTIONS } from "../../../types/ipd";
 import type { DaycareStackParamList } from "./DaycareListScreen";
 
 type Props = NativeStackScreenProps<DaycareStackParamList, "DaycareDetail">;
@@ -28,42 +31,70 @@ type Props = NativeStackScreenProps<DaycareStackParamList, "DaycareDetail">;
 export function DaycareDetailScreen({ route, navigation }: Props) {
   const { sessionId } = route.params;
   const insets = useSafeAreaInsets();
-  const { data: session, isLoading } = useDaycareSession(sessionId);
+  const toast = useToast();
+
+  const session = useDaycareSession(sessionId);
+  const doctors = useDoctors();
+  const dischargeAdmission = useDischargeDaycareAdmission();
+
+  const [dischargeType, setDischargeType] = useState("routine");
+  const [summary, setSummary] = useState("");
+  const [finalDiagnosis, setFinalDiagnosis] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const a = session.data;
 
   useLayoutEffect(() => {
-    if (session) {
+    if (a) {
       navigation.setOptions({
-        title: session.sessionRef,
+        title: a.admission_id,
         headerRight: () => (
           <View className="pr-1">
-            <Chip
-              label={DAYCARE_STATUS_LABELS[session.status]}
-              variant={DAYCARE_STATUS_CHIP_VARIANT[session.status]}
-            />
+            <Badge label={DAYCARE_STATUS_LABELS[a.status]} variant={ADMISSION_STATUS_VARIANT[a.status]} />
           </View>
         ),
       });
     }
-  }, [navigation, session]);
+  }, [navigation, a]);
 
-  if (isLoading) {
-    return (
-      <View className="flex-1 items-center justify-center bg-background">
-        <ActivityIndicator />
-      </View>
+  const doctorName = useMemo(() => {
+    if (!a?.doctor_id) return undefined;
+    return (doctors.data ?? []).find((d) => d.user_id === a.doctor_id)?.full_name;
+  }, [a?.doctor_id, doctors.data]);
+
+  function handleDischarge() {
+    if (!a) return;
+    const validationError = daycareDischargeValidationError(a.admission_date);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setError(null);
+    dischargeAdmission.mutate(
+      {
+        id: a.id,
+        payload: {
+          discharge_type: dischargeType,
+          discharge_summary: summary.trim() || undefined,
+          final_diagnosis: finalDiagnosis.trim() || undefined,
+        },
+      },
+      {
+        onSuccess: () => toast.show("Session discharged", "success"),
+        onError: (err) =>
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Couldn't discharge — daycare sessions must be discharged the same day they were admitted."
+          ),
+      }
     );
   }
 
-  if (!session) {
+  if (session.isLoading || !a) {
     return (
-      <View className="flex-1 items-center justify-center bg-background px-6">
-        <Text className="text-base font-semibold text-foreground">
-          Session not found
-        </Text>
-        <Text className="mt-1 text-sm text-muted-foreground text-center">
-          The daycare session may have been rescheduled or removed. Try going
-          back to the list.
-        </Text>
+      <View className="flex-1 items-center justify-center bg-background">
+        <ActivityIndicator />
       </View>
     );
   }
@@ -77,155 +108,134 @@ export function DaycareDetailScreen({ route, navigation }: Props) {
       }}
       showsVerticalScrollIndicator={false}
     >
-      {/* Identity header — Avatar + name + KeyValueRow summary */}
+      {/* Identity header */}
       <View className="px-4 pt-4">
         <Card padded={false}>
           <View className="flex-row items-center gap-3 p-4">
-            <Avatar source={session.patientName} size="lg" />
+            <Avatar source={a.patient_name} size="lg" />
             <View className="flex-1 gap-1">
-              <Text
-                className="text-base font-semibold text-foreground"
-                numberOfLines={1}
-              >
-                {session.patientName}
+              <Text className="text-base font-semibold text-foreground" numberOfLines={1}>
+                {a.patient_name}
               </Text>
               <Text className="text-xs text-muted-foreground" numberOfLines={1}>
-                {session.patientId} · {session.sessionRef}
+                {a.patient_id_display} · {a.admission_id}
               </Text>
               <View className="flex-row items-center gap-1.5 pt-1">
-                <Chip
-                  label={DAYCARE_STATUS_LABELS[session.status]}
-                  variant={DAYCARE_STATUS_CHIP_VARIANT[session.status]}
-                />
-                <Chip
-                  label={DAYCARE_SESSION_TYPE_LABELS[session.sessionType]}
-                  variant="neutral"
-                />
+                <Badge label={DAYCARE_STATUS_LABELS[a.status]} variant={ADMISSION_STATUS_VARIANT[a.status]} />
+                {a.has_mediclaim ? <Badge label="Mediclaim" variant="outline" /> : null}
               </View>
             </View>
           </View>
           <View className="border-t border-border/60 px-1">
-            <KeyValueRow label="Date" value={formatDaycareDate(session.date)} />
-            <KeyValueRow label="Time slot" value={session.timeSlot} />
-            <KeyValueRow label="Bed / chair" value={session.bedOrChair} />
-            <KeyValueRow
-              label="Attending doctor"
-              value={session.attendingDoctor}
-              action={{ icon: "call-outline", onPress: () => {}, label: "Call doctor" }}
-            />
+            <KeyValueRow label="Ward / bed" value={`${a.ward_name}${a.bed_number ? ` / Bed ${a.bed_number}` : ""}`} />
+            <KeyValueRow label="Admitted" value={formatDaycareDate(a.admission_date)} />
+            <KeyValueRow label="Discharged" value={formatDaycareDate(a.discharge_date)} />
+            {doctorName ? <KeyValueRow label="Attending doctor" value={doctorName} /> : null}
+            {a.patient_mobile ? <KeyValueRow label="Mobile" value={a.patient_mobile} /> : null}
           </View>
         </Card>
       </View>
 
-      {/* Quick stats — 2x2 grid of aggregate numbers */}
-      <View className="px-4">
-        <View className="flex-row gap-2">
-          <View className="flex-1">
-            <StatTile
-              icon="today-outline"
-              label="Today"
-              value={String(DEMO_DAYCARE_QUICK_STATS.todaySessions)}
-              tint="blue"
-              hint="Sessions scheduled today"
-            />
-          </View>
-          <View className="flex-1">
-            <StatTile
-              icon="pulse-outline"
-              label="In progress"
-              value={String(DEMO_DAYCARE_QUICK_STATS.inProgress)}
-              tint="amber"
-              hint="Currently checked in"
-            />
-          </View>
-        </View>
-        <View className="flex-row gap-2 mt-2">
-          <View className="flex-1">
-            <StatTile
-              icon="checkmark-circle-outline"
-              label="Completed"
-              value={String(DEMO_DAYCARE_QUICK_STATS.completedThisWeek)}
-              tint="emerald"
-              hint="This week"
-            />
-          </View>
-          <View className="flex-1">
-            <StatTile
-              icon="close-circle-outline"
-              label="Cancelled"
-              value={String(DEMO_DAYCARE_QUICK_STATS.cancelledThisWeek)}
-              tint="rose"
-              hint="This week"
-            />
-          </View>
-        </View>
-      </View>
-
-      {/* Session notes */}
+      {/* Reason & diagnosis */}
       <View>
-        <SectionHeader title="Session notes" />
-        <View className="px-4">
-          <Card>
-            <Text className="text-sm leading-relaxed text-foreground">
-              {session.notes}
-            </Text>
-          </Card>
-        </View>
-      </View>
-
-      {/* Pre-session vitals snapshot */}
-      <View>
-        <SectionHeader title="Pre-session vitals" />
+        <SectionHeader title="Reason & diagnosis" />
         <View className="px-4">
           <Card padded={false}>
-            {session.vitals ? (
-              <View className="px-1">
-                <KeyValueRow label="Blood pressure" value={session.vitals.bp} />
-                <KeyValueRow label="Pulse" value={`${session.vitals.pulse} bpm`} />
-                <KeyValueRow label="Temperature" value={session.vitals.temp} />
-                {session.vitals.spo2 ? (
-                  <KeyValueRow label="SpO2" value={session.vitals.spo2} />
-                ) : null}
-                <KeyValueRow label="Recorded at" value={session.vitals.recordedAt} />
-              </View>
-            ) : (
-              <View className="flex-row items-center gap-3 p-4">
-                <View className="h-9 w-9 items-center justify-center rounded-full bg-muted">
-                  <Ionicons name="hourglass-outline" size={18} color="#64748b" />
-                </View>
-                <Text className="flex-1 text-sm text-muted-foreground">
-                  Vitals not yet recorded — will be captured at check-in.
-                </Text>
-              </View>
-            )}
-          </Card>
-        </View>
-      </View>
-
-      {/* Status timeline */}
-      <View>
-        <SectionHeader
-          title="Status timeline"
-          count={`${session.timeline.length} event${session.timeline.length === 1 ? "" : "s"}`}
-        />
-        <View className="px-4">
-          <Card padded={false}>
-            <View className="p-4">
-              {session.timeline.map((event, i) => (
-                <TimelineRow
-                  key={`${event.title}-${i}`}
-                  title={event.title}
-                  subtitle={event.subtitle}
-                  when={event.when}
-                  tint={event.tint}
-                  icon={event.icon}
-                  isLast={i === session.timeline.length - 1}
-                />
-              ))}
+            <View className="px-1">
+              <KeyValueRow label="Reason" value={a.reason || "—"} />
+              <KeyValueRow label="Provisional diagnosis" value={a.provisional_diagnosis || "—"} />
+              {a.final_diagnosis ? <KeyValueRow label="Final diagnosis" value={a.final_diagnosis} /> : null}
             </View>
           </Card>
         </View>
       </View>
+
+      {/* Billing summary */}
+      <View>
+        <SectionHeader title="Billing" />
+        <View className="px-4">
+          <Card padded={false}>
+            <View className="px-1">
+              <KeyValueRow label="Bill total" value={a.bill_total ?? "—"} />
+              <KeyValueRow label="Bill paid" value={a.bill_paid ?? "—"} />
+            </View>
+          </Card>
+        </View>
+      </View>
+
+      {/* Same-day discharge action */}
+      {a.status === "admitted" ? (
+        <View>
+          <SectionHeader title="Discharge" />
+          <View className="px-4 gap-4">
+            <Card>
+              <View className="flex-row items-center gap-2 mb-1">
+                <Ionicons name="information-circle-outline" size={16} color="#64748b" />
+                <Text className="flex-1 text-xs text-muted-foreground">
+                  Daycare sessions must be discharged the same day they were admitted.
+                </Text>
+              </View>
+            </Card>
+            <View>
+              <Text className="text-sm font-medium text-foreground mb-2">Discharge type</Text>
+              <View className="flex-row flex-wrap gap-2">
+                {DISCHARGE_TYPE_OPTIONS.map((opt) => {
+                  const selected = dischargeType === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      accessibilityRole="button"
+                      onPress={() => setDischargeType(opt.value)}
+                      className={[
+                        "h-9 items-center justify-center rounded-full px-3.5",
+                        selected ? "bg-primary" : "bg-secondary active:opacity-70",
+                      ].join(" ")}
+                    >
+                      <Text
+                        className={[
+                          "text-[13px] font-medium",
+                          selected ? "text-primary-foreground" : "text-secondary-foreground",
+                        ].join(" ")}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <Input
+              label="Discharge summary (optional)"
+              value={summary}
+              onChangeText={setSummary}
+              multiline
+            />
+            <Input
+              label="Final diagnosis (optional)"
+              value={finalDiagnosis}
+              onChangeText={setFinalDiagnosis}
+              multiline
+            />
+            <InlineError message={error} />
+            <Button title="Discharge session" onPress={handleDischarge} loading={dischargeAdmission.isPending} />
+          </View>
+        </View>
+      ) : (
+        <View className="px-4">
+          <Card>
+            <View className="flex-row items-center gap-2">
+              <Ionicons name="checkmark-circle" size={18} color="#10b981" />
+              <Text className="text-sm font-semibold text-foreground">Session discharged</Text>
+            </View>
+            {a.discharge_type ? (
+              <Text className="text-sm text-foreground mt-2">Type: {a.discharge_type}</Text>
+            ) : null}
+            {a.final_diagnosis ? (
+              <Text className="text-sm text-foreground mt-2">Diagnosis: {a.final_diagnosis}</Text>
+            ) : null}
+          </Card>
+        </View>
+      )}
     </ScrollView>
   );
 }

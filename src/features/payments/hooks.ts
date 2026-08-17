@@ -1,76 +1,88 @@
 /**
- * Payments hooks.
- *
- * __demo: true — for the Phase 3 demo these return the static fixtures from
- * `constants.ts`. The shape is the same one the future API will return, so the
- * screens don't need to change when the live endpoint lands. Each hook just
- * swaps to a `useQuery({ queryFn: ... })` against `lib/api/payments`.
- *
- * Filter / search are applied client-side over the demo data. The real API
- * will take these as query params, but the input contract stays identical.
+ * Payments hooks — TanStack Query wrappers around `lib/api/payments`'s
+ * module-wide CRUD (`listPayments`/`getPayment`/`getPaymentStats`/
+ * `createPayment`/`updatePayment`/`deletePayment`), following the same
+ * query-key-factory + `useSignedIn()` gate pattern as `features/opd/hooks.ts`.
  */
-import { useMemo } from "react";
-import {
-  DEMO_PAYMENTS,
-  type PaymentStatus,
-  type PaymentTransaction,
-} from "./constants";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as api from "../../lib/api/payments";
+import { useAuth } from "../../store/AuthContext";
+import type {
+  PaymentCreatePayload,
+  PaymentListParams,
+  PaymentStatsParams,
+  PaymentUpdatePayload,
+} from "../../types/payments";
 
-export interface UsePaymentsListParams {
-  /** Free-text search across patient name, ref, and transaction ID. */
-  search?: string;
-  /** Filter by status. `all` (or undefined) returns everything. */
-  status?: "all" | PaymentStatus;
+function useSignedIn(): boolean {
+  return useAuth().status === "signedIn";
 }
 
-export interface UsePaymentsListResult {
-  data: PaymentTransaction[];
-  isLoading: boolean;
-  isError: boolean;
-  /** Subset of the dataset before filtering — useful for "showing X of Y". */
-  totalCount: number;
+export const paymentKeys = {
+  list: (params?: PaymentListParams) => ["payments", "list", params ?? {}] as const,
+  detail: (id: string) => ["payments", "detail", id] as const,
+  stats: (params?: PaymentStatsParams) => ["payments", "stats", params ?? {}] as const,
+};
+
+export function usePaymentsList(params?: PaymentListParams) {
+  const enabled = useSignedIn();
+  return useQuery({
+    queryKey: paymentKeys.list(params),
+    queryFn: () => api.listPayments(params),
+    enabled,
+  });
 }
 
-export function usePaymentsList(
-  params: UsePaymentsListParams = {}
-): UsePaymentsListResult {
-  const { search, status = "all" } = params;
-
-  const filtered = useMemo(() => {
-    const q = search?.trim().toLowerCase() ?? "";
-    return DEMO_PAYMENTS.filter((p) => {
-      if (status !== "all" && p.status !== status) return false;
-      if (q.length === 0) return true;
-      return (
-        p.patientName.toLowerCase().includes(q) ||
-        p.transactionRef.toLowerCase().includes(q) ||
-        p.relatedRef.toLowerCase().includes(q) ||
-        p.patientId.toLowerCase().includes(q)
-      );
-    });
-  }, [search, status]);
-
-  return {
-    data: filtered,
-    isLoading: false,
-    isError: false,
-    totalCount: DEMO_PAYMENTS.length,
-  };
+export function usePayment(id: string | null | undefined) {
+  const enabled = useSignedIn() && Boolean(id);
+  return useQuery({
+    queryKey: paymentKeys.detail(id ?? ""),
+    queryFn: () => api.getPayment(id as string),
+    enabled,
+  });
 }
 
-/**
- * Look up a single transaction by id. Receives the same shape the API will
- * return — the future implementation will read `/payments/{id}`.
- */
-export function usePayment(id: string | null | undefined): {
-  data: PaymentTransaction | null;
-  isLoading: boolean;
-  isError: boolean;
-} {
-  const data = useMemo(() => {
-    if (!id) return null;
-    return DEMO_PAYMENTS.find((p) => p.id === id) ?? null;
-  }, [id]);
+export function usePaymentStats(params?: PaymentStatsParams) {
+  const enabled = useSignedIn();
+  return useQuery({
+    queryKey: paymentKeys.stats(params),
+    queryFn: () => api.getPaymentStats(params),
+    enabled,
+    staleTime: 30_000,
+  });
+}
 
-  return { data, isLoading: false, isError: false };
+export function useCreatePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: PaymentCreatePayload) => api.createPayment(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["payments", "list"] });
+      qc.invalidateQueries({ queryKey: ["payments", "stats"] });
+    },
+  });
+}
+
+export function useUpdatePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: PaymentUpdatePayload }) =>
+      api.updatePayment(id, payload),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: paymentKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: ["payments", "list"] });
+      qc.invalidateQueries({ queryKey: ["payments", "stats"] });
+    },
+  });
+}
+
+export function useDeletePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deletePayment(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["payments", "list"] });
+      qc.invalidateQueries({ queryKey: ["payments", "stats"] });
+    },
+  });
 }
